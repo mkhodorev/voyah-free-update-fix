@@ -1,0 +1,28 @@
+# IDE
+.idea
+.vscode
+
+# Output of the go covetage tool
+*.out
+*.stat
+
+# Test binary `go test -c`
+*.test
+!.env.test
+
+# Ignore Mac DS_Store files
+.DS_Store
+**/.DS_Store
+
+# Temporary files
+.tmp
+.tmp/*
+!.tmp/.keep
+tmp/*
+!tmp/.keep
+.cache/
+
+/.env
+
+.git
+bin/*

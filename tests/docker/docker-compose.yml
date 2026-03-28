@@ -1,0 +1,8 @@
+services:
+  integration-test-target:
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile
+    container_name: voyah-integration-test-target
+    ports:
+      - "2222:22"
