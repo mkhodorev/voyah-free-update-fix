@@ -84,7 +84,7 @@ WHERE "type" = 'task_info'
 	}
 
 	if rowsAffected == 0 {
-		return errors.New("error while removing packages from ota_task: No rows were updated")
+		return errors.New("error while removing packages from ota_task: no rows were updated")
 	}
 
 	return nil

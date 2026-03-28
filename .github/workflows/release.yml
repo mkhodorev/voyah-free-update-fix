@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and publish release assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Verify Docker is available
+        run: |
+          docker version
+          docker compose version
+
+      - name: Run integration tests (docker)
+        run: go test -tags=integration ./tests/...
+
+      - name: Build release archives
+        env:
+          APP_NAME: voyah-update-fix
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          build_target() {
+            local goos="$1"
+            local goarch="$2"
+            local ext="$3"
+            local binary="${APP_NAME}-${goos}-${goarch}${ext}"
+            local archive_base="${APP_NAME}_${VERSION}_${goos}_${goarch}"
+
+            echo "Building ${binary}"
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build -o "dist/${binary}" ./cmd/voyah-update-fix
+
+            if [ "${goos}" = "windows" ]; then
+              (cd dist && zip -q "${archive_base}.zip" "${binary}")
+              rm -f "dist/${binary}"
+            else
+              tar -C dist -czf "dist/${archive_base}.tar.gz" "${binary}"
+              rm -f "dist/${binary}"
+            fi
+          }
+
+          build_target darwin amd64 ""
+          build_target darwin arm64 ""
+          build_target linux amd64 ""
+          build_target linux arm64 ""
+          build_target windows amd64 ".exe"
+          build_target windows arm64 ".exe"
+
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          path: dist/*
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*

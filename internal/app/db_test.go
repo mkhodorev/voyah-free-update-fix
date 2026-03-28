@@ -13,7 +13,6 @@ import (
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	t.Parallel()
 
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
