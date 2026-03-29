@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"voyah-update-fix/internal/app"
+	"voyah-free-update-fix/internal/app"
 
 	_ "modernc.org/sqlite"
 )

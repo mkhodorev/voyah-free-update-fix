@@ -35,7 +35,7 @@ jobs:
 
       - name: Build release archives
         env:
-          APP_NAME: voyah-update-fix
+          APP_NAME: voyah-free-update-fix
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -49,7 +49,7 @@ jobs:
             local archive_base="${APP_NAME}_${VERSION}_${goos}_${goarch}"
 
             echo "Building ${binary}"
-            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build -o "dist/${binary}" ./cmd/voyah-update-fix
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build -o "dist/${binary}" ./cmd/voyah-free-update-fix
 
             if [ "${goos}" = "windows" ]; then
               (cd dist && zip -q "${archive_base}.zip" "${binary}")

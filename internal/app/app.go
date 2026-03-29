@@ -67,7 +67,7 @@ func RunWithConfig(cfg RuntimeConfig) error {
 
 	sshClient, err := connectToTBox(net.JoinHostPort(ipAddress, sshPort), username, password)
 	if err != nil {
-		return fmt.Errorf("ssh connection error: %w", err)
+		return fmt.Errorf("t-box connection error: %w", err)
 	}
 	defer sshClient.Close()
 

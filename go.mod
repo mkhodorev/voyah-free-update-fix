@@ -1,4 +1,4 @@
-module voyah-update-fix
+module voyah-free-update-fix
 
 go 1.25.1
 

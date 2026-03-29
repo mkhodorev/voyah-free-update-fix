@@ -1,5 +1,5 @@
-APP_NAME := voyah-update-fix
-CMD_PATH := ./cmd/voyah-update-fix
+APP_NAME := voyah-free-update-fix
+CMD_PATH := ./cmd/voyah-free-update-fix
 BUILD_DIR := ./bin
 
 GO ?= go

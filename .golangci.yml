@@ -140,7 +140,7 @@ linters:
     rules:
       - linters:
           - forbidigo
-        path: (internal/app/.*|cmd/voyah-update-fix/main\.go)$
+        path: (internal/app/.*|cmd/voyah-free-update-fix/main\.go)$
       - linters:
           - revive
         path: internal/infrastructure/repository/project/project.go

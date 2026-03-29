@@ -276,8 +276,8 @@ func runFixContextDBViaCmd(
 	})
 	waitPort(t, "127.0.0.1:2222", 60*time.Second)
 
-	binaryPath := filepath.Join(dirs.tmpDir, "voyah-update-fix")
-	runCmd(t, dirs.repoRoot, "go", "build", "-o", binaryPath, "./cmd/voyah-update-fix")
+	binaryPath := filepath.Join(dirs.tmpDir, "voyah-free-update-fix")
+	runCmd(t, dirs.repoRoot, "go", "build", "-o", binaryPath, "./cmd/voyah-free-update-fix")
 
 	preparedDB := filepath.Join(dirs.tmpDir, "prepared_context.db")
 	copyFile(t, filepath.Join(dirs.fixturesDir, "context.db"), preparedDB)
