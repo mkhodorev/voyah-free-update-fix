@@ -44,6 +44,7 @@ func getOTATaskData(dbConn *sql.DB) (string, error) {
 	return taskData, nil
 }
 
+//nolint:mnd
 func removeUndownloadedPackagesInDB(dbConn *sql.DB, packageIDsToDelete []int) error {
 	if len(packageIDsToDelete) == 0 {
 		return nil
@@ -52,22 +53,39 @@ func removeUndownloadedPackagesInDB(dbConn *sql.DB, packageIDsToDelete []int) er
 	// Удаляем с конца массива к началу, чтобы индексы не съезжали.
 	sort.Sort(sort.Reverse(sort.IntSlice(packageIDsToDelete)))
 
-	placeholders := make([]string, 0, len(packageIDsToDelete))
-	args := make([]any, 0, len(packageIDsToDelete))
+	removePaths := make([]string, 0, len(packageIDsToDelete)+2)
+	removePaths = append(removePaths, "$.flash_state", "$.schedule_state")
 
 	for _, idx := range packageIDsToDelete {
 		if idx < 0 {
 			return fmt.Errorf("error while removing packages from ota_task: invalid package index: %d", idx)
 		}
 
-		placeholders = append(placeholders, "?")
-		args = append(args, fmt.Sprintf("$.packages_info[%d]", idx))
+		removePaths = append(removePaths, fmt.Sprintf("$.packages_info[%d]", idx))
 	}
+
+	placeholders := make([]string, 0, len(removePaths))
+	args := make([]any, 0, len(removePaths)+2)
+
+	for _, path := range removePaths {
+		placeholders = append(placeholders, "?")
+		args = append(args, path)
+	}
+
+	args = append(args,
+		//nolint:misspell
+		`{"download_type":0,"percents":90,"stage":"Retrive Packages"}`,
+		`{"stage":"Download","state":"Process"}`,
+	)
 
 	//nolint:gosec
 	query := fmt.Sprintf(`
 UPDATE ota_task
-SET taskData = json_remove(taskData, %s)
+SET taskData = json_set(
+	json_remove(taskData, %s),
+	'$.download_state', json(?),
+	'$.overall_state', json(?)
+)
 WHERE "type" = 'task_info'
   AND json_valid(taskData)
   AND json_type(taskData, '$.packages_info') = 'array';

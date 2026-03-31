@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 
 	"voyah-free-update-fix/internal/app"
 
@@ -22,7 +24,30 @@ func main() {
 
 	if err := app.RunWithConfig(cfg); err != nil {
 		fmt.Printf("%v\n", err)
+		waitForExitOnWindows()
 
 		os.Exit(1)
 	}
+
+	waitForExitOnWindows()
+}
+
+func waitForExitOnWindows() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	stdinInfo, err := os.Stdin.Stat()
+	if err != nil {
+		return
+	}
+
+	if (stdinInfo.Mode() & os.ModeCharDevice) == 0 {
+		return
+	}
+
+	fmt.Print("Press any key to exit...")
+
+	reader := bufio.NewReader(os.Stdin)
+	_, _ = reader.ReadByte()
 }

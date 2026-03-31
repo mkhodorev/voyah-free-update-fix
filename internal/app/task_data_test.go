@@ -168,6 +168,54 @@ func TestCheckFixContextDB(t *testing.T) {
 	})
 }
 
+func TestIsFixStateAllowed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("download process state is allowed", func(t *testing.T) {
+		t.Parallel()
+
+		taskData := otaTaskData{
+			//nolint:misspell
+			DownloadState: otaDownloadState{Stage: "Retrive Packages"},
+			OverallState:  otaOverallState{Stage: "Download", State: "Process"},
+		}
+
+		if !isFixStateAllowed(taskData) {
+			t.Fatal("expected state to be allowed")
+		}
+	})
+
+	t.Run("flash failure state is allowed", func(t *testing.T) {
+		t.Parallel()
+
+		taskData := otaTaskData{
+			DownloadState: otaDownloadState{Stage: "Complete"},
+			OverallState:  otaOverallState{Stage: "Terminate", State: "Failed"},
+			FlashState: &otaFlashState{
+				FailureReason:          "FLASH_FAIL",
+				FailureReasonExtraInfo: "IVI_MPU flash failed",
+			},
+		}
+
+		if !isFixStateAllowed(taskData) {
+			t.Fatal("expected flash-failure state to be allowed")
+		}
+	})
+
+	t.Run("terminate failed with unknown state is not allowed", func(t *testing.T) {
+		t.Parallel()
+
+		taskData := otaTaskData{
+			DownloadState: otaDownloadState{Stage: "Complete"},
+			OverallState:  otaOverallState{Stage: "Terminate", State: "XZ"},
+		}
+
+		if isFixStateAllowed(taskData) {
+			t.Fatal("expected state to be rejected with unknown overall_state.state")
+		}
+	})
+}
+
 func TestFormatBytes(t *testing.T) {
 	t.Parallel()
 

@@ -158,8 +158,24 @@ func analyzeContextDB(sftpClient *sftp.Client) (bool, []int, error) {
 	printTaskDataInfo(taskData, rows, stats)
 
 	fixRequired, missingPackageIDs := checkFixContextDB(rows)
+	if !fixRequired {
+		return false, nil, nil
+	}
 
-	return fixRequired, missingPackageIDs, nil
+	if !isFixStateAllowed(taskData) {
+		fmt.Println()
+		fmt.Printf(
+			"%sThe context.db fix can be started only in one of states:%s\n",
+			colorRed,
+			colorReset,
+		)
+		fmt.Println("  - download_state.stage='Retrive Packages' and packages IVI_MCU, IVI_MPU or T-Box are not downloaded")
+		fmt.Println("  - download_state.stage='Complete' and flash failure of IVI_MCU, IVI_MPU or T-Box")
+
+		return false, nil, nil
+	}
+
+	return true, missingPackageIDs, nil
 }
 
 //nolint:cyclop

@@ -41,6 +41,7 @@ const (
 	acEnc     = "/mnt/ota/data/fota/download/AC/6a75074f6d79f4db5d81be2c8e504209ceef5180be5017373c8780b0584df8e6.enc.full"
 	acOtx     = "/mnt/ota/data/fota/download/AC/5ed57e69074d4865b20db966b32355c17eca82bdfea1a8a385a71f2a3d41ea0a.otx"
 	tBoxEnc   = "/mnt/ota/data/fota/download/T-BOX/8824cf636494f3a86ff10c406065a9c956f7bbcc2960177e17a1c6a2d8a5481f.enc.full"
+	tBoxEnc2  = "/mnt/ota/data/fota/download/T-BOX/390ae279d8d8765ec1b170ed8dd2d6472cb43cd7edd5984579f0af5230c21ed1.enc.full"
 	tBoxOtx   = "/mnt/ota/data/fota/download/T-BOX/49b4536d036f54f8fa065bc592836bffb967163fbab4a759c554b356b7d2ff5e.otx"
 	vcuEnc    = "/mnt/ota/data/fota/download/VCU/cfc0168a15c3d9e33a706c1bea6c2e108d0bd4a07274bfee54a841a6007fcc3b.enc.full"
 	vcuOtx    = "/mnt/ota/data/fota/download/VCU/c099a0788b66e8d18f6f94f03b9e6f8eda7e6b6f835021f65c58ecbaf2df2466.otx"
@@ -208,6 +209,21 @@ func TestFixContextDB_when_already_fixed(t *testing.T) {
 			vcuOtx,
 		},
 		expectBackup: false,
+	}
+
+	runFixContextDBViaCmd(t, cfg)
+}
+
+func TestFixContextDB_WhenFlashFailOnlyIVIOrTBoxMissing(t *testing.T) {
+	cfg := fixContextDBCmdRunConfig{
+		originTaskFileName:   "origin_flash_fail.txt",
+		modifiedTaskFileName: "modified_when_ivi_flash_fail.txt",
+		filesToCreate: []string{
+			remoteContextJSONPath,
+			tBoxEnc2,
+			tBoxOtx,
+		},
+		expectBackup: true,
 	}
 
 	runFixContextDBViaCmd(t, cfg)

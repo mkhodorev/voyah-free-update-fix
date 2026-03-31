@@ -1,3 +1,4 @@
+//nolint:cyclop
 package app
 
 import (
@@ -71,6 +72,28 @@ func extractPackageECUs(t *testing.T, db *sql.DB) []string {
 	return out
 }
 
+func extractTaskDataMap(t *testing.T, db *sql.DB) map[string]any {
+	t.Helper()
+
+	var taskData string
+
+	row := db.QueryRowContext(
+		context.Background(),
+		`SELECT taskData FROM ota_task WHERE type = 'task_info'`,
+	)
+
+	if err := row.Scan(&taskData); err != nil {
+		t.Fatalf("failed to read taskData: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(taskData), &parsed); err != nil {
+		t.Fatalf("failed to unmarshal taskData: %v", err)
+	}
+
+	return parsed
+}
+
 func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 	t.Parallel()
 
@@ -98,7 +121,13 @@ func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 		db := newTestDB(t)
 		defer db.Close()
 
-		insertTaskDataRow(t, db, `{"packages_info":[{"ecu":"A"},{"ecu":"B"},{"ecu":"C"},{"ecu":"D"}]}`)
+		insertTaskDataRow(t, db, `{
+			"packages_info":[{"ecu":"A"},{"ecu":"B"},{"ecu":"C"},{"ecu":"D"}],
+			"flash_state":{"failure_reason":"FLASH_FAIL"},
+			"schedule_state":{"stage":"Time Reached"},
+			"download_state":{"download_type":0,"percents":100,"stage":"Complete"},
+			"overall_state":{"stage":"Terminate","state":"Failed"}
+		}`)
 
 		if err := removeUndownloadedPackagesInDB(db, []int{1, 3}); err != nil {
 			t.Fatalf("removeUndownloadedPackagesInDB returned error: %v", err)
@@ -109,6 +138,34 @@ func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 		want := []string{"A", "C"}
 		if !reflect.DeepEqual(ecus, want) {
 			t.Fatalf("unexpected packages after delete: got %v, want %v", ecus, want)
+		}
+
+		taskData := extractTaskDataMap(t, db)
+		if _, ok := taskData["flash_state"]; ok {
+			t.Fatal("flash_state must be removed")
+		}
+
+		if _, ok := taskData["schedule_state"]; ok {
+			t.Fatal("schedule_state must be removed")
+		}
+
+		downloadState, ok := taskData["download_state"].(map[string]any)
+		if !ok {
+			t.Fatalf("download_state has unexpected type: %T", taskData["download_state"])
+		}
+
+		//nolint:misspell
+		if downloadState["stage"] != "Retrive Packages" {
+			t.Fatalf("unexpected download_state.stage: %v", downloadState["stage"])
+		}
+
+		overallState, ok := taskData["overall_state"].(map[string]any)
+		if !ok {
+			t.Fatalf("overall_state has unexpected type: %T", taskData["overall_state"])
+		}
+
+		if overallState["stage"] != "Download" || overallState["state"] != "Process" {
+			t.Fatalf("unexpected overall_state: %+v", overallState)
 		}
 	})
 
