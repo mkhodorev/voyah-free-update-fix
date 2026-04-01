@@ -127,6 +127,36 @@ func TestFixContextDB_WithoutIVI_MPU_IVI_MCU_and_context_json_exists(t *testing.
 	runFixContextDBViaCmd(t, cfg)
 }
 
+func TestFixContextDB_WithoutIVI_MPU_IVI_MCU_and_context_json_exists_and_without_BCM_OTX(t *testing.T) {
+	cfg := fixContextDBCmdRunConfig{
+		originTaskFileName:   "origin.txt",
+		modifiedTaskFileName: "modified_without_ivi_mpu_ivi_mcu.txt",
+		filesToCreate: []string{
+			remoteContextJSONPath,
+			bmsEnc,
+			bmsOtx,
+			bleEnc,
+			bleOtx,
+			mcuf0Enc,
+			mcuf0Otx,
+			bcmEnc,
+			gtwEnc,
+			gtwOtx,
+			dscuEnc,
+			dscuOtx,
+			acEnc,
+			acOtx,
+			tBoxEnc,
+			tBoxOtx,
+			vcuEnc,
+			vcuOtx,
+		},
+		expectBackup: true,
+	}
+
+	runFixContextDBViaCmd(t, cfg)
+}
+
 func TestFixContextDB_WithoutIVI_MPU_IVI_MCU_and_when_tbox_files_not_exist(t *testing.T) {
 	cfg := fixContextDBCmdRunConfig{
 		originTaskFileName:   "origin.txt",

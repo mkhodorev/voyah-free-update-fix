@@ -149,6 +149,25 @@ func TestCheckFixContextDB(t *testing.T) {
 		}
 	})
 
+	t.Run("missing otx does not block fix readiness", func(t *testing.T) {
+		t.Parallel()
+
+		rows := []packageRow{
+			{ECU: "ADAS", Status: "downloaded", FileExists: true, UpgradeSpecExists: false, OriginalIndex: 0},
+			{ECU: iviMPUName, Status: "pending", FileExists: false, UpgradeSpecExists: false, OriginalIndex: 1},
+		}
+
+		fixRequired, ids := checkFixContextDB(rows)
+		if !fixRequired {
+			t.Fatal("expected fixRequired=true when only exceptional package is missing and required package has enc file")
+		}
+
+		want := []int{1}
+		if !reflect.DeepEqual(ids, want) {
+			t.Fatalf("unexpected ids to delete: got %v, want %v", ids, want)
+		}
+	})
+
 	t.Run("all good no fix", func(t *testing.T) {
 		t.Parallel()
 
@@ -272,5 +291,24 @@ func TestBuildMarshalRoundtripWithPackageInfo(t *testing.T) {
 
 	if len(b) == 0 {
 		t.Fatal("marshal produced empty output")
+	}
+}
+
+func TestCollectMissingUpgradeSpecs(t *testing.T) {
+	t.Parallel()
+
+	rows := []packageRow{
+		{ECU: "ADAS", Status: "downloaded", FileExists: true, UpgradeSpecExists: false},
+		{ECU: "BMS", Status: "downloaded", FileExists: true, UpgradeSpecExists: true},
+		{ECU: "VCU", Status: "downloading", FileExists: true, UpgradeSpecExists: false},
+		{ECU: "T-BOX", Status: "flashed", FileExists: true, UpgradeSpecExists: false},
+		{ECU: "IVI_MPU", Status: "downloaded", FileExists: false, UpgradeSpecExists: false},
+	}
+
+	got := collectMissingUpgradeSpecs(rows)
+	want := []string{"ADAS", "T-BOX"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("collectMissingUpgradeSpecs() = %v, want %v", got, want)
 	}
 }

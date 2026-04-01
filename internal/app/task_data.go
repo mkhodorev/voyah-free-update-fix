@@ -430,6 +430,7 @@ func printUpdateReadiness(rows []packageRow, sty textStyle) {
 			sty.green(sty.bold("All packages are downloaded.")),
 			"Please wait for the update to start.",
 		)
+		printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
 
 		return
 	}
@@ -441,6 +442,7 @@ func printUpdateReadiness(rows []packageRow, sty textStyle) {
 		)
 		fmt.Println(sty.red(sty.magenta("These ECUs must be updated manually!")))
 		fmt.Println(sty.green(sty.bold("\nThe context.db fix can be started.")))
+		printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
 
 		return
 	}
@@ -492,6 +494,7 @@ func printFlashFailureStatus(rows []packageRow, sty textStyle) {
 	fmt.Println(sty.magenta(sty.bold("These ECUs must be updated manually!")))
 
 	fmt.Println(sty.green(sty.bold("\nThe context.db fix can be started.")))
+	printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
 }
 
 func collectMissingECUs(rows []packageRow) ([]string, []string) {
@@ -522,8 +525,35 @@ func collectMissingECUs(rows []packageRow) ([]string, []string) {
 
 func isPackageReady(row packageRow) bool {
 	return (row.Status == packageStatusDownloaded || row.Status == packageStatusFlashed) &&
-		row.FileExists &&
-		row.UpgradeSpecExists
+		row.FileExists
+}
+
+func collectMissingUpgradeSpecs(rows []packageRow) []string {
+	missingUpgradeSpecs := make([]string, 0)
+
+	for _, row := range rows {
+		if !isPackageReady(row) || row.UpgradeSpecExists {
+			continue
+		}
+
+		missingUpgradeSpecs = append(missingUpgradeSpecs, row.ECU)
+	}
+
+	sort.Strings(missingUpgradeSpecs)
+
+	return missingUpgradeSpecs
+}
+
+func printMissingUpgradeSpecsWarning(missingUpgradeSpecs []string, sty textStyle) {
+	if len(missingUpgradeSpecs) == 0 {
+		return
+	}
+
+	fmt.Printf("%s %s\n",
+		sty.yellow(sty.bold("\nWarning: missing upgrade spec files (.otx):")),
+		sty.yellow(strings.Join(missingUpgradeSpecs, ", ")),
+	)
+	fmt.Println(sty.yellow("The OTA update may not start immediately."))
 }
 
 func styleExistsValue(exists bool, width int, sty textStyle) string {
