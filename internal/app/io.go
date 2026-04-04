@@ -150,6 +150,23 @@ func fileExistsOnTBox(client *sftp.Client, filePath string) bool {
 	return false
 }
 
+func fileExistsAndNotEmptyOnTBox(client *sftp.Client, filePath string) bool {
+	return fileExistsAndNotEmpty(client.Stat, filePath)
+}
+
+func fileExistsAndNotEmpty(statFn func(string) (os.FileInfo, error), filePath string) bool {
+	if filePath == "" {
+		return false
+	}
+
+	info, err := statFn(filePath)
+	if err != nil || info == nil {
+		return false
+	}
+
+	return info.Size() > 0
+}
+
 func deleteContextJSONOnTBox(client *sftp.Client) error {
 	contextJSON := path.Join(tboxDir, contextJSONName)
 

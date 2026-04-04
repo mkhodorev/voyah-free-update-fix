@@ -197,8 +197,8 @@ func buildPackageRowsAndStats(packages []otaPackageInfo, sftpClient *sftp.Client
 			Status:            status,
 			MaxPercent:        pkg.MaxUpgradePercent,
 			ParallelSeq:       pkg.ParallelUpgradeSequence,
-			FileExists:        fileExistsOnTBox(sftpClient, pkg.File),
-			UpgradeSpecExists: fileExistsOnTBox(sftpClient, pkg.UpgradeSpecFile),
+			FileExists:        fileExistsAndNotEmptyOnTBox(sftpClient, pkg.File),
+			UpgradeSpecExists: fileExistsAndNotEmptyOnTBox(sftpClient, pkg.UpgradeSpecFile),
 			OriginalIndex:     id,
 		})
 	}
