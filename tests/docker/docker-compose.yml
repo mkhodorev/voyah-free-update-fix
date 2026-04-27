@@ -4,5 +4,7 @@ services:
       context: ../..
       dockerfile: tests/docker/Dockerfile
     container_name: voyah-integration-test-target
+    environment:
+      DISABLE_SFTP: ${DISABLE_SFTP:-0}
     ports:
       - "2222:22"

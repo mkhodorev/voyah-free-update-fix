@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/pkg/sftp"
 )
 
 type otaTaskData struct {
@@ -162,7 +160,7 @@ func parseOTATaskData(raw string) (otaTaskData, error) {
 	return parsed, nil
 }
 
-func buildPackageRowsAndStats(packages []otaPackageInfo, sftpClient *sftp.Client) ([]packageRow, packageStats) {
+func buildPackageRowsAndStats(packages []otaPackageInfo, client tboxFileClient) ([]packageRow, packageStats) {
 	rows := make([]packageRow, 0, len(packages))
 	stats := packageStats{}
 
@@ -197,8 +195,8 @@ func buildPackageRowsAndStats(packages []otaPackageInfo, sftpClient *sftp.Client
 			Status:            status,
 			MaxPercent:        pkg.MaxUpgradePercent,
 			ParallelSeq:       pkg.ParallelUpgradeSequence,
-			FileExists:        fileExistsAndNotEmptyOnTBox(sftpClient, pkg.File),
-			UpgradeSpecExists: fileExistsAndNotEmptyOnTBox(sftpClient, pkg.UpgradeSpecFile),
+			FileExists:        fileExistsAndNotEmptyOnTBox(client, pkg.File),
+			UpgradeSpecExists: fileExistsAndNotEmptyOnTBox(client, pkg.UpgradeSpecFile),
 			OriginalIndex:     id,
 		})
 	}

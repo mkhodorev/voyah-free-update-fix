@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,7 @@ type fixContextDBCmdRunConfig struct {
 	modifiedTaskFileName string
 	filesToCreate        []string
 	expectBackup         bool
+	disableSFTP          bool
 }
 
 func TestFixContextDB_WithoutIVI_MPU_IVI_MCU(t *testing.T) {
@@ -259,6 +261,84 @@ func TestFixContextDB_WhenFlashFailOnlyIVIOrTBoxMissing(t *testing.T) {
 	runFixContextDBViaCmd(t, cfg)
 }
 
+func TestFixContextDBViaSCP_WithoutIVI_MPU_IVI_MCU(t *testing.T) {
+	cfg := fixContextDBCmdRunConfig{
+		originTaskFileName:   "origin.txt",
+		modifiedTaskFileName: "modified_without_ivi_mpu_ivi_mcu.txt",
+		filesToCreate: []string{
+			remoteContextJSONPath,
+			bmsEnc,
+			bmsOtx,
+			bleEnc,
+			bleOtx,
+			mcuf0Enc,
+			mcuf0Otx,
+			bcmEnc,
+			bcmOtx,
+			gtwEnc,
+			gtwOtx,
+			dscuEnc,
+			dscuOtx,
+			acEnc,
+			acOtx,
+			tBoxEnc,
+			tBoxOtx,
+			vcuEnc,
+			vcuOtx,
+		},
+		expectBackup: true,
+		disableSFTP:  true,
+	}
+
+	runFixContextDBViaCmd(t, cfg)
+}
+
+func TestFixContextDBViaSCP_WithoutIVI_MPU_IVI_MCU_and_when_tbox_files_not_exist(t *testing.T) {
+	cfg := fixContextDBCmdRunConfig{
+		originTaskFileName:   "origin.txt",
+		modifiedTaskFileName: "modified_without_ivi_mpu_ivi_mcu_tbox.txt",
+		filesToCreate: []string{
+			bmsEnc,
+			bmsOtx,
+			bleEnc,
+			bleOtx,
+			mcuf0Enc,
+			mcuf0Otx,
+			bcmEnc,
+			bcmOtx,
+			gtwEnc,
+			gtwOtx,
+			dscuEnc,
+			dscuOtx,
+			acEnc,
+			acOtx,
+			tBoxOtx,
+			vcuEnc,
+			vcuOtx,
+		},
+		expectBackup: true,
+		disableSFTP:  true,
+	}
+
+	runFixContextDBViaCmd(t, cfg)
+}
+
+func TestFixContextDBViaSCP_WhenFlashFailOnlyIVIOrTBoxMissing(t *testing.T) {
+	cfg := fixContextDBCmdRunConfig{
+		originTaskFileName:   "origin_flash_fail.txt",
+		modifiedTaskFileName: "modified_when_ivi_flash_fail.txt",
+		filesToCreate: []string{
+			remoteContextJSONPath,
+			tBoxEnc2,
+			tBoxOtx,
+		},
+		expectBackup: true,
+		disableSFTP:  true,
+	}
+
+	runFixContextDBViaCmd(t, cfg)
+}
+
 func setupTestDirs(t *testing.T) testDirs {
 	t.Helper()
 
@@ -316,6 +396,10 @@ func runFixContextDBViaCmd(
 	originTaskData := readTextFile(t, filepath.Join(dirs.fixturesDir, cfg.originTaskFileName))
 	modifiedTaskData := readTextFile(t, filepath.Join(dirs.fixturesDir, cfg.modifiedTaskFileName))
 
+	if cfg.disableSFTP {
+		t.Setenv("DISABLE_SFTP", "1")
+	}
+
 	runCmd(t, dirs.repoRoot, "docker", "compose", "-f", dirs.composeFile, "up", "-d", "--build")
 	t.Cleanup(func() {
 		runCmdNoFail(dirs.repoRoot, "docker", "compose", "-f", dirs.composeFile, "down", "-v", "--remove-orphans")
@@ -349,12 +433,15 @@ func runFixContextDBViaCmd(
 	if err != nil {
 		t.Fatalf("cmd failed:\n%s\nerror: %v", string(out), err)
 	}
+	if cfg.disableSFTP && !strings.Contains(string(out), "SFTP unavailable, using SCP fallback.") {
+		t.Fatalf("expected SCP fallback message in output, got:\n%s", string(out))
+	}
 
 	resultDB := filepath.Join(dirs.tmpDir, "context_after_fix.db")
 	dockerCopyFromContainer(t, containerName+":"+remoteDBPath, resultDB)
 	gotTaskData := readTaskDataFromDB(t, resultDB)
 	if gotTaskData != strings.TrimSpace(modifiedTaskData) {
-		t.Fatalf("unexpected taskData after cmd run")
+		t.Fatalf("unexpected taskData after cmd run: %s", rawDiffSummary(strings.TrimSpace(modifiedTaskData), gotTaskData))
 	}
 
 	if cfg.expectBackup {
@@ -434,7 +521,7 @@ func verifyBackupArchiveAndCleanup(t *testing.T, backupDir, originTaskData strin
 
 	gotOriginTaskData := readTaskDataFromDB(t, extractedDBPath)
 	if gotOriginTaskData != strings.TrimSpace(originTaskData) {
-		t.Fatalf("unexpected taskData in backup archive")
+		t.Fatalf("unexpected taskData in backup archive: %s", rawDiffSummary(strings.TrimSpace(originTaskData), gotOriginTaskData))
 	}
 
 	if err := os.RemoveAll(backupDir); err != nil {
@@ -449,7 +536,7 @@ func createFilesInContainer(t *testing.T, filesToCreate []string) {
 		if strings.TrimSpace(file) == "" {
 			continue
 		}
-		dockerExec(t, "mkdir -p "+shellQuote(filepath.Dir(file))+" && touch "+shellQuote(file))
+		dockerExec(t, "mkdir -p "+shellQuote(filepath.Dir(file))+" && printf x > "+shellQuote(file))
 	}
 }
 
@@ -515,6 +602,44 @@ func readTextFile(t *testing.T, path string) string {
 		t.Fatalf("failed to read %s: %v", path, err)
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func rawDiffSummary(want, got string) string {
+	const contextBytes = 80
+
+	maxLen := len(want)
+	if len(got) < maxLen {
+		maxLen = len(got)
+	}
+
+	diffAt := maxLen
+	for i := range maxLen {
+		if want[i] != got[i] {
+			diffAt = i
+			break
+		}
+	}
+
+	start := diffAt - contextBytes
+	if start < 0 {
+		start = 0
+	}
+
+	wantEnd := diffAt + contextBytes
+	if wantEnd > len(want) {
+		wantEnd = len(want)
+	}
+
+	gotEnd := diffAt + contextBytes
+	if gotEnd > len(got) {
+		gotEnd = len(got)
+	}
+
+	return "len(want)=" + strconv.Itoa(len(want)) +
+		" len(got)=" + strconv.Itoa(len(got)) +
+		" diff_at=" + strconv.Itoa(diffAt) +
+		" want_near=" + strconv.Quote(want[start:wantEnd]) +
+		" got_near=" + strconv.Quote(got[start:gotEnd])
 }
 
 func dockerAvailable() bool {
