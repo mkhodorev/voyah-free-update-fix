@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -71,13 +70,13 @@ func RunWithConfig(cfg RuntimeConfig) error {
 	}
 	defer sshClient.Close()
 
-	sftpClient, err := sftp.NewClient(sshClient)
+	remoteFS, err := newTBoxFileClient(sshClient)
 	if err != nil {
-		return fmt.Errorf("sftp client error: %w", err)
+		return fmt.Errorf("file transport error: %w", err)
 	}
-	defer sftpClient.Close()
+	defer remoteFS.Close()
 
-	acceptToStartFix, missingPackageIDs, err := analyzeContextDB(sftpClient)
+	acceptToStartFix, missingPackageIDs, err := analyzeContextDB(remoteFS)
 	if err != nil {
 		return fmt.Errorf("error analyzing context.db: %w", err)
 	}
@@ -90,7 +89,7 @@ func RunWithConfig(cfg RuntimeConfig) error {
 		return nil
 	}
 
-	if err := fixContextDB(sshClient, sftpClient, missingPackageIDs); err != nil {
+	if err := fixContextDB(sshClient, remoteFS, missingPackageIDs); err != nil {
 		return fmt.Errorf("error fixing context.db: %w", err)
 	}
 
@@ -129,8 +128,8 @@ func applyRuntimeConfig(cfg RuntimeConfig) {
 	}
 }
 
-func analyzeContextDB(sftpClient *sftp.Client) (bool, []int, error) {
-	err := downloadContextDB(sftpClient)
+func analyzeContextDB(client tboxFileClient) (bool, []int, error) {
+	err := downloadContextDB(client)
 	if err != nil {
 		return false, nil, fmt.Errorf("error downloading context.db: %w", err)
 	}
@@ -153,7 +152,7 @@ func analyzeContextDB(sftpClient *sftp.Client) (bool, []int, error) {
 		return false, nil, err
 	}
 
-	rows, stats := buildPackageRowsAndStats(taskData.PackagesInfo, sftpClient)
+	rows, stats := buildPackageRowsAndStats(taskData.PackagesInfo, client)
 
 	printTaskDataInfo(taskData, rows, stats)
 
@@ -179,11 +178,11 @@ func analyzeContextDB(sftpClient *sftp.Client) (bool, []int, error) {
 }
 
 //nolint:cyclop
-func fixContextDB(sshClient *ssh.Client, sftpClient *sftp.Client, missingPackageIDs []int) error {
+func fixContextDB(sshClient *ssh.Client, client tboxFileClient, missingPackageIDs []int) error {
 	fmt.Println()
 	fmt.Println("Start fixing context.db...")
 
-	err := downloadContextDB(sftpClient)
+	err := downloadContextDB(client)
 	if err != nil {
 		return fmt.Errorf("error downloading context.db: %w", err)
 	}
@@ -192,7 +191,7 @@ func fixContextDB(sshClient *ssh.Client, sftpClient *sftp.Client, missingPackage
 
 	existContextJSON := true
 
-	err = downloadContextJSON(sftpClient)
+	err = downloadContextJSON(client)
 	if err != nil {
 		if !errors.Is(err, errContextJSONNotFound) {
 			return fmt.Errorf("error downloading context.json: %w", err)
@@ -219,14 +218,14 @@ func fixContextDB(sshClient *ssh.Client, sftpClient *sftp.Client, missingPackage
 	dbConn.Close()
 
 	if existContextJSON {
-		if err := deleteContextJSONOnTBox(sftpClient); err != nil {
+		if err := deleteContextJSONOnTBox(client); err != nil {
 			return fmt.Errorf("error deleting context.json on T-Box: %w", err)
 		}
 
 		fmt.Println("Context.json deleted from T-Box.")
 	}
 
-	if err := uploadContextDB(sftpClient); err != nil {
+	if err := uploadContextDB(client); err != nil {
 		return fmt.Errorf("error uploading fixed context.db: %w", err)
 	}
 

@@ -11,32 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
-const (
-	sshConnectTimeout = 10 * time.Second
-	backupDirMode     = 0o755
-)
+const backupDirMode = 0o755
 
 var errContextJSONNotFound = errors.New("context.json not found on tbox")
 
-//nolint:gosec
-func connectToTBox(addr, user, password string) (*ssh.Client, error) {
-	sshConfig := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(password),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         sshConnectTimeout,
-	}
-
-	return ssh.Dial("tcp", addr, sshConfig)
-}
-
-func contextDBJournalExists(sftpClient *sftp.Client, contextDBPath string) bool {
+func contextDBJournalExists(client tboxFileClient, contextDBPath string) bool {
 	// SQLite может использовать:
 	// - rollback journal: context.db-journal
 	// - WAL: context.db-wal + context.db-shm
@@ -47,7 +29,7 @@ func contextDBJournalExists(sftpClient *sftp.Client, contextDBPath string) bool 
 	}
 
 	for _, p := range journalFiles {
-		if ok := fileExistsOnTBox(sftpClient, p); ok {
+		if ok := fileExistsOnTBox(client, p); ok {
 			return true
 		}
 	}
@@ -55,17 +37,17 @@ func contextDBJournalExists(sftpClient *sftp.Client, contextDBPath string) bool 
 	return false
 }
 
-func downloadContextDB(sftpClient *sftp.Client) error {
+func downloadContextDB(client tboxFileClient) error {
 	contextDBPath := path.Join(tboxDir, contextDBName)
 
-	if ok := fileExistsOnTBox(sftpClient, contextDBPath); !ok {
+	if ok := fileExistsOnTBox(client, contextDBPath); !ok {
 		return fmt.Errorf("file %s not found", contextDBPath)
 	}
 
 	var journalExists bool
 
 	for range 60 {
-		journalExists = contextDBJournalExists(sftpClient, contextDBPath)
+		journalExists = contextDBJournalExists(client, contextDBPath)
 		if !journalExists {
 			break
 		}
@@ -77,95 +59,64 @@ func downloadContextDB(sftpClient *sftp.Client) error {
 		return errors.New("db journal exists, file is busy! Try again later")
 	}
 
-	src, err := sftpClient.Open(contextDBPath)
-	if err != nil {
-		return fmt.Errorf("error opening file %s on T-Box: %w", contextDBPath, err)
-	}
-	defer src.Close()
-
-	dst, err := os.Create(localContextDBTmpFile)
-	if err != nil {
-		return fmt.Errorf("error creating local file %s: %w", localContextDBTmpFile, err)
-	}
-
-	defer func() {
-		_ = dst.Close()
-	}()
-
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("error copying T-Box->local %s: %w", localContextDBTmpFile, err)
-	}
-
-	if err := dst.Sync(); err != nil {
-		return fmt.Errorf("error syncing local file %s: %w", localContextDBTmpFile, err)
+	if err := client.Download(contextDBPath, localContextDBTmpFile); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func downloadContextJSON(sftpClient *sftp.Client) error {
+func downloadContextJSON(client tboxFileClient) error {
 	contextJSONPath := path.Join(tboxDir, contextJSONName)
 
-	if ok := fileExistsOnTBox(sftpClient, contextJSONPath); !ok {
+	if ok := fileExistsOnTBox(client, contextJSONPath); !ok {
 		return errContextJSONNotFound
 	}
 
-	src, err := sftpClient.Open(contextJSONPath)
-	if err != nil {
-		return fmt.Errorf("error opening remote file %s on T-Box: %w", contextJSONPath, err)
-	}
-	defer src.Close()
-
-	dst, err := os.Create(localContextJSONTmpFile)
-	if err != nil {
-		return fmt.Errorf("error creating local file %s: %w", localContextJSONTmpFile, err)
-	}
-
-	defer func() {
-		_ = dst.Close()
-	}()
-
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("error copying T-Box->local %s: %w", localContextJSONTmpFile, err)
-	}
-
-	if err := dst.Sync(); err != nil {
-		return fmt.Errorf("error syncing local file %s: %w", localContextJSONTmpFile, err)
+	if err := client.Download(contextJSONPath, localContextJSONTmpFile); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-//nolint:staticcheck
-func fileExistsOnTBox(client *sftp.Client, filePath string) bool {
+func fileExistsOnTBox(client tboxFileClient, filePath string) bool {
+	return client.Exists(filePath)
+}
+
+func fileExistsAndNotEmptyOnTBox(client tboxFileClient, filePath string) bool {
+	return client.ExistsAndNotEmpty(filePath)
+}
+
+func fileExistsAndNotEmpty(statFn func(string) (os.FileInfo, error), filePath string) bool {
 	if filePath == "" {
 		return false
 	}
 
-	_, err := client.Stat(filePath)
-	if err == nil {
-		return true
+	info, err := statFn(filePath)
+	if err != nil || info == nil {
+		return false
 	}
 
-	return false
+	return info.Size() > 0
 }
 
-func deleteContextJSONOnTBox(client *sftp.Client) error {
+func deleteContextJSONOnTBox(client tboxFileClient) error {
 	contextJSON := path.Join(tboxDir, contextJSONName)
 
 	if err := client.Remove(contextJSON); err != nil {
-		return fmt.Errorf("error deleting file %s on T-Box: %w", contextJSON, err)
+		return err
 	}
 
 	return nil
 }
 
-func uploadContextDB(sftpClient *sftp.Client) error {
+func uploadContextDB(client tboxFileClient) error {
 	contextDBPath := path.Join(tboxDir, contextDBName)
 
 	var journalExists bool
 	for range 60 {
-		journalExists = contextDBJournalExists(sftpClient, contextDBPath)
+		journalExists = contextDBJournalExists(client, contextDBPath)
 		if !journalExists {
 			break
 		}
@@ -177,31 +128,8 @@ func uploadContextDB(sftpClient *sftp.Client) error {
 		return errors.New("db journal exists, file is busy! Try again later")
 	}
 
-	src, err := os.Open(localContextDBTmpFile)
-	if err != nil {
-		return fmt.Errorf("error opening local file %s: %w", localContextDBTmpFile, err)
-	}
-	defer src.Close()
-
-	dst, err := sftpClient.OpenFile(contextDBPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
-	if err != nil {
-		return fmt.Errorf("error opening file %s on T-Box for overwrite: %w", contextDBPath, err)
-	}
-
-	defer func() {
-		_ = dst.Close()
-	}()
-
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("error copying local->T-Box %s: %w", contextDBPath, err)
-	}
-
-	if err := dst.Sync(); err != nil {
-		return fmt.Errorf("error syncing file %s on T-Box: %w", contextDBPath, err)
-	}
-
-	if err := dst.Close(); err != nil {
-		return fmt.Errorf("error closing file %s on T-Box: %w", contextDBPath, err)
+	if err := client.Upload(localContextDBTmpFile, contextDBPath); err != nil {
+		return err
 	}
 
 	return nil
