@@ -8,28 +8,38 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type otaTaskData struct {
-	TaskID                 int              `json:"task_id"`
-	TaskType               int              `json:"task_type"`
-	SessionID              string           `json:"session_id"`
-	UpgradeType            int              `json:"upgrade_type"`
-	SourceBaselineVersion  string           `json:"source_baseline_version"`
-	TargetBaselineVersion  string           `json:"target_baseline_version"`
-	PredictUpgradeDuration int              `json:"predict_upgrade_duration"`
-	RetryUpgrade           bool             `json:"retry_upgrade"`
-	Rollback               bool             `json:"rollback"`
-	OverallState           otaOverallState  `json:"overall_state"`
-	DownloadState          otaDownloadState `json:"download_state"`
-	FlashState             *otaFlashState   `json:"flash_state,omitempty"`
-	PackagesInfo           []otaPackageInfo `json:"packages_info"`
+	TaskID                 int               `json:"task_id"`
+	TaskType               int               `json:"task_type"`
+	SessionID              string            `json:"session_id"`
+	UpgradeType            int               `json:"upgrade_type"`
+	SourceBaselineVersion  string            `json:"source_baseline_version"`
+	TargetBaselineVersion  string            `json:"target_baseline_version"`
+	PredictUpgradeDuration int               `json:"predict_upgrade_duration"`
+	RetryUpgrade           bool              `json:"retry_upgrade"`
+	Rollback               bool              `json:"rollback"`
+	OverallState           otaOverallState   `json:"overall_state"`
+	DownloadState          otaDownloadState  `json:"download_state"`
+	FlashState             *otaFlashState    `json:"flash_state,omitempty"`
+	PackagesInfo           []otaPackageInfo  `json:"packages_info"`
+	ScheduleState          *otaScheduleState `json:"schedule_state,omitempty"`
+	ExpireTime             *otaExpireTime    `json:"expire_time,omitempty"`
 }
 
 type otaOverallState struct {
 	Stage string `json:"stage"`
 	State string `json:"state"`
 }
+
+type otaScheduleState struct {
+	SetTime int64  `json:"set_time"`
+	Stage   string `json:"stage"`
+}
+
+type otaExpireTime int64
 
 type otaDownloadState struct {
 	DownloadType int    `json:"download_type"`
@@ -281,6 +291,22 @@ func printTaskOverview(taskData otaTaskData, sty textStyle) {
 		sty.bold(fmt.Sprintf("%d min", taskData.PredictUpgradeDuration)),
 	)
 
+	if taskData.ScheduleState != nil {
+		if taskData.ScheduleState.Stage != "" {
+			fmt.Printf("%s: %s\n",
+				sty.bold("Schedule state stage"),
+				sty.cyan(taskData.ScheduleState.Stage),
+			)
+		}
+
+		if taskData.ScheduleState.SetTime > 0 {
+			fmt.Printf("%s: %s\n",
+				sty.bold("Schedule time"),
+				sty.cyan(time.Unix(taskData.ScheduleState.SetTime, 0).Format("02.01.2006 15:04:05")),
+			)
+		}
+	}
+
 	if isFlashFailureCase(taskData) {
 		fmt.Printf("%s: %s\n",
 			sty.bold("Flash failure reason"),
@@ -289,6 +315,13 @@ func printTaskOverview(taskData otaTaskData, sty textStyle) {
 		fmt.Printf("%s: %s\n",
 			sty.bold("Flash failure details"),
 			sty.red(taskData.FlashState.FailureReasonExtraInfo),
+		)
+	}
+
+	if taskData.ExpireTime != nil && *taskData.ExpireTime > 0 {
+		fmt.Printf("%s: %s\n",
+			sty.bold("Expire time"),
+			sty.cyan(time.Unix(int64(*taskData.ExpireTime), 0).Format("02.01.2006 15:04:05")),
 		)
 	}
 
