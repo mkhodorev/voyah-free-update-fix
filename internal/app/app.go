@@ -170,6 +170,8 @@ func analyzeContextDB(client tboxFileClient) (bool, []int, error) {
 		)
 		fmt.Println("  - download_state.stage='Retrive Packages' and packages IVI_MCU, IVI_MPU or T-Box are not downloaded")
 		fmt.Println("  - download_state.stage='Complete' and flash failure of IVI_MCU, IVI_MPU or T-Box")
+		fmt.Println("  - download_state.stage='Complete', overall_state.stage='Terminate', overall_state.state='Idle'")
+		fmt.Println("      and packages IVI_MCU, IVI_MPU or T-Box package files are missing")
 
 		return false, nil, nil
 	}

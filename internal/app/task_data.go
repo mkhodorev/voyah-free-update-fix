@@ -116,6 +116,7 @@ const (
 	overallStageTerminate    = "Terminate"
 	overallStateProcess      = "Process"
 	overallStateFailed       = "Failed"
+	overallStateIdle         = "Idle"
 )
 
 func newTextStyle() textStyle {
@@ -445,7 +446,8 @@ func isDownloadProcessCase(taskData otaTaskData) bool {
 func isFlashFailureCase(taskData otaTaskData) bool {
 	return taskData.DownloadState.Stage == downloadStageComplete &&
 		taskData.OverallState.Stage == overallStageTerminate &&
-		taskData.OverallState.State == overallStateFailed
+		(taskData.OverallState.State == overallStateFailed ||
+			taskData.OverallState.State == overallStateIdle)
 }
 
 func printUpdateReadiness(rows []packageRow, sty textStyle) {
@@ -499,6 +501,16 @@ func printFlashFailureStatus(rows []packageRow, sty textStyle) {
 	sort.Strings(missingRequired)
 
 	fmt.Println(sty.bold(sty.cyan("=== Readiness Status ===")))
+
+	if len(missingExceptional) == 0 && len(missingRequired) == 0 {
+		fmt.Printf("%s\n%s\n",
+			sty.green(sty.bold("All packages are downloaded.")),
+			"No context.db fix is required.",
+		)
+		printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
+
+		return
+	}
 
 	if len(missingExceptional) > 0 {
 		fmt.Printf("%s %s\n",

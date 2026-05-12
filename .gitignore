@@ -21,6 +21,7 @@
 tmp/*
 !tmp/.keep
 .cache/
+backup/*
 
 /.env
 

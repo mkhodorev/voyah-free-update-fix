@@ -221,6 +221,19 @@ func TestIsFixStateAllowed(t *testing.T) {
 		}
 	})
 
+	t.Run("complete terminate idle state is allowed", func(t *testing.T) {
+		t.Parallel()
+
+		taskData := otaTaskData{
+			DownloadState: otaDownloadState{Stage: "Complete"},
+			OverallState:  otaOverallState{Stage: "Terminate", State: "Idle"},
+		}
+
+		if !isFixStateAllowed(taskData) {
+			t.Fatal("expected complete/terminate/idle state to be allowed")
+		}
+	})
+
 	t.Run("terminate failed with unknown state is not allowed", func(t *testing.T) {
 		t.Parallel()
 
