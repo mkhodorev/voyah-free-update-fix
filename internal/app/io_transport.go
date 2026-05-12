@@ -34,6 +34,7 @@ func connectToTBox(addr, user, password string) (*ssh.Client, error) {
 	return ssh.Dial("tcp", addr, sshConfig)
 }
 
+//nolint:ireturn
 func newTBoxFileClient(sshClient *ssh.Client) (tboxFileClient, error) {
 	sftpClient, err := sftp.NewClient(sshClient)
 	if err == nil {
