@@ -43,6 +43,7 @@ type otaExpireTime int64
 
 type otaDownloadState struct {
 	DownloadType int    `json:"download_type"`
+	FailInfo     string `json:"fail_info"`
 	Percents     int    `json:"percents"`
 	Stage        string `json:"stage"`
 }
@@ -287,6 +288,12 @@ func printTaskOverview(taskData otaTaskData, sty textStyle) {
 			colorizeByPercent(fmt.Sprintf("%d%%", taskData.DownloadState.Percents), taskData.DownloadState.Percents, sty),
 		),
 	)
+	if taskData.DownloadState.FailInfo != "" {
+		fmt.Printf("%s: %s\n",
+			sty.bold("Download state fail info"),
+			sty.red(taskData.DownloadState.FailInfo),
+		)
+	}
 	fmt.Printf("%s: %s\n",
 		sty.bold("Predict upgrade duration"),
 		sty.bold(fmt.Sprintf("%d min", taskData.PredictUpgradeDuration)),
@@ -308,7 +315,7 @@ func printTaskOverview(taskData otaTaskData, sty textStyle) {
 		}
 	}
 
-	if isFlashFailureCase(taskData) {
+	if isFlashFailureCase(taskData) && taskData.FlashState != nil {
 		fmt.Printf("%s: %s\n",
 			sty.bold("Flash failure reason"),
 			sty.red(taskData.FlashState.FailureReason),
