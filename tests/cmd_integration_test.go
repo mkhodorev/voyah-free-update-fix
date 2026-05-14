@@ -261,6 +261,37 @@ func TestFixContextDB_WhenFlashFailOnlyIVIOrTBoxMissing(t *testing.T) {
 	runFixContextDBViaCmd(t, cfg)
 }
 
+func TestFixContextDB_WhenIdleAndIVIMissing(t *testing.T) {
+	cfg := fixContextDBCmdRunConfig{
+		originTaskFileName:   "origin_idle.txt",
+		modifiedTaskFileName: "modified_when_idle.txt",
+		filesToCreate: []string{
+			remoteContextJSONPath,
+			bmsEnc,
+			bmsOtx,
+			bleEnc,
+			bleOtx,
+			mcuf0Enc,
+			mcuf0Otx,
+			bcmEnc,
+			bcmOtx,
+			gtwEnc,
+			gtwOtx,
+			dscuEnc,
+			dscuOtx,
+			acEnc,
+			acOtx,
+			tBoxEnc,
+			tBoxOtx,
+			vcuEnc,
+			vcuOtx,
+		},
+		expectBackup: true,
+	}
+
+	runFixContextDBViaCmd(t, cfg)
+}
+
 func TestFixContextDBViaSCP_WithoutIVI_MPU_IVI_MCU(t *testing.T) {
 	cfg := fixContextDBCmdRunConfig{
 		originTaskFileName:   "origin.txt",

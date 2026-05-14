@@ -31,6 +31,7 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
+//nolint:cyclop
 func TestReadSCPHeader(t *testing.T) {
 	t.Parallel()
 
@@ -38,6 +39,7 @@ func TestReadSCPHeader(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader("C0644 42 context.db\n"))
+
 		size, err := readSCPHeader(reader)
 		if err != nil {
 			t.Fatalf("readSCPHeader returned error: %v", err)
@@ -52,6 +54,7 @@ func TestReadSCPHeader(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader(string([]byte{0x01}) + "permission denied\n"))
+
 		_, err := readSCPHeader(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -66,6 +69,7 @@ func TestReadSCPHeader(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader("C0644 xyz context.db\n"))
+
 		_, err := readSCPHeader(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -80,6 +84,7 @@ func TestReadSCPHeader(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader("C0644 -1 context.db\n"))
+
 		_, err := readSCPHeader(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -94,6 +99,7 @@ func TestReadSCPHeader(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader("C0999 42 context.db\n"))
+
 		_, err := readSCPHeader(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -108,6 +114,7 @@ func TestReadSCPHeader(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader("C0644 42 context.db extra\n"))
+
 		_, err := readSCPHeader(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -122,6 +129,7 @@ func TestReadSCPHeader(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader("X0644 42 context.db\n"))
+
 		_, err := readSCPHeader(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -149,6 +157,7 @@ func TestReadSCPAck(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader(string([]byte{0x02}) + "fatal\n"))
+
 		err := readSCPAck(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -163,6 +172,7 @@ func TestReadSCPAck(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader(string([]byte{0x01}) + "\n"))
+
 		err := readSCPAck(reader)
 		if err == nil {
 			t.Fatal("expected error")
@@ -177,6 +187,7 @@ func TestReadSCPAck(t *testing.T) {
 		t.Parallel()
 
 		reader := bufio.NewReader(strings.NewReader(string([]byte{0x7F})))
+
 		err := readSCPAck(reader)
 		if err == nil {
 			t.Fatal("expected error")

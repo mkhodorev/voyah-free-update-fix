@@ -96,6 +96,7 @@ func (c *scpFileClient) Remove(filePath string) error {
 	return nil
 }
 
+//nolint:unparam
 func (c *scpFileClient) runCommand(cmd string) ([]byte, error) {
 	session, err := c.sshClient.NewSession()
 	if err != nil {
@@ -116,6 +117,7 @@ func (c *scpFileClient) runCommand(cmd string) ([]byte, error) {
 	return output, nil
 }
 
+//nolint:cyclop,funlen
 func (c *scpFileClient) downloadWithSCP(remotePath string, dst io.Writer) error {
 	session, err := c.sshClient.NewSession()
 	if err != nil {
@@ -134,6 +136,7 @@ func (c *scpFileClient) downloadWithSCP(remotePath string, dst io.Writer) error 
 	}
 
 	var stderr bytes.Buffer
+
 	session.Stderr = &stderr
 
 	if err := session.Start("scp -f " + shellQuote(remotePath)); err != nil {
@@ -183,6 +186,7 @@ func (c *scpFileClient) downloadWithSCP(remotePath string, dst io.Writer) error 
 	return nil
 }
 
+//nolint:cyclop,funlen
 func (c *scpFileClient) uploadWithSCP(remotePath string, src io.Reader, size int64) error {
 	session, err := c.sshClient.NewSession()
 	if err != nil {
@@ -201,6 +205,7 @@ func (c *scpFileClient) uploadWithSCP(remotePath string, src io.Reader, size int
 	}
 
 	var stderr bytes.Buffer
+
 	session.Stderr = &stderr
 
 	if err := session.Start("scp -t " + shellQuote(remotePath)); err != nil {
@@ -248,6 +253,7 @@ func (c *scpFileClient) uploadWithSCP(remotePath string, src io.Reader, size int
 	return nil
 }
 
+//nolint:cyclop,mnd
 func readSCPHeader(reader *bufio.Reader) (int64, error) {
 	firstByte, err := reader.ReadByte()
 	if err != nil {
@@ -281,6 +287,7 @@ func readSCPHeader(reader *bufio.Reader) (int64, error) {
 		if parseErr != nil {
 			return 0, fmt.Errorf("invalid scp file size in header %q: %w", line, parseErr)
 		}
+
 		if size < 0 {
 			return 0, fmt.Errorf("invalid negative scp file size in header %q", line)
 		}
@@ -295,6 +302,7 @@ func readSCPHeader(reader *bufio.Reader) (int64, error) {
 	}
 }
 
+//nolint:mnd
 func isValidSCPFileMode(mode string) bool {
 	if len(mode) != 4 {
 		return false
@@ -309,6 +317,7 @@ func isValidSCPFileMode(mode string) bool {
 	return true
 }
 
+//nolint:mnd
 func readSCPAck(reader *bufio.Reader) error {
 	ack, err := reader.ReadByte()
 	if err != nil {

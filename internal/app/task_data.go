@@ -43,6 +43,7 @@ type otaExpireTime int64
 
 type otaDownloadState struct {
 	DownloadType int    `json:"download_type"`
+	FailInfo     string `json:"fail_info"`
 	Percents     int    `json:"percents"`
 	Stage        string `json:"stage"`
 }
@@ -116,6 +117,7 @@ const (
 	overallStageTerminate    = "Terminate"
 	overallStateProcess      = "Process"
 	overallStateFailed       = "Failed"
+	overallStateIdle         = "Idle"
 )
 
 func newTextStyle() textStyle {
@@ -286,6 +288,12 @@ func printTaskOverview(taskData otaTaskData, sty textStyle) {
 			colorizeByPercent(fmt.Sprintf("%d%%", taskData.DownloadState.Percents), taskData.DownloadState.Percents, sty),
 		),
 	)
+	if taskData.DownloadState.FailInfo != "" {
+		fmt.Printf("%s: %s\n",
+			sty.bold("Download state fail info"),
+			sty.red(taskData.DownloadState.FailInfo),
+		)
+	}
 	fmt.Printf("%s: %s\n",
 		sty.bold("Predict upgrade duration"),
 		sty.bold(fmt.Sprintf("%d min", taskData.PredictUpgradeDuration)),
@@ -307,7 +315,7 @@ func printTaskOverview(taskData otaTaskData, sty textStyle) {
 		}
 	}
 
-	if isFlashFailureCase(taskData) {
+	if isFlashFailureCase(taskData) && taskData.FlashState != nil {
 		fmt.Printf("%s: %s\n",
 			sty.bold("Flash failure reason"),
 			sty.red(taskData.FlashState.FailureReason),
@@ -445,7 +453,8 @@ func isDownloadProcessCase(taskData otaTaskData) bool {
 func isFlashFailureCase(taskData otaTaskData) bool {
 	return taskData.DownloadState.Stage == downloadStageComplete &&
 		taskData.OverallState.Stage == overallStageTerminate &&
-		taskData.OverallState.State == overallStateFailed
+		(taskData.OverallState.State == overallStateFailed ||
+			taskData.OverallState.State == overallStateIdle)
 }
 
 func printUpdateReadiness(rows []packageRow, sty textStyle) {
@@ -499,6 +508,16 @@ func printFlashFailureStatus(rows []packageRow, sty textStyle) {
 	sort.Strings(missingRequired)
 
 	fmt.Println(sty.bold(sty.cyan("=== Readiness Status ===")))
+
+	if len(missingExceptional) == 0 && len(missingRequired) == 0 {
+		fmt.Printf("%s\n%s\n",
+			sty.green(sty.bold("All packages are downloaded.")),
+			"No context.db fix is required.",
+		)
+		printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
+
+		return
+	}
 
 	if len(missingExceptional) > 0 {
 		fmt.Printf("%s %s\n",

@@ -2,6 +2,8 @@ package app
 
 import (
 	"encoding/json"
+	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -221,6 +223,19 @@ func TestIsFixStateAllowed(t *testing.T) {
 		}
 	})
 
+	t.Run("complete terminate idle state is allowed", func(t *testing.T) {
+		t.Parallel()
+
+		taskData := otaTaskData{
+			DownloadState: otaDownloadState{Stage: "Complete"},
+			OverallState:  otaOverallState{Stage: "Terminate", State: "Idle"},
+		}
+
+		if !isFixStateAllowed(taskData) {
+			t.Fatal("expected complete/terminate/idle state to be allowed")
+		}
+	})
+
 	t.Run("terminate failed with unknown state is not allowed", func(t *testing.T) {
 		t.Parallel()
 
@@ -233,6 +248,45 @@ func TestIsFixStateAllowed(t *testing.T) {
 			t.Fatal("expected state to be rejected with unknown overall_state.state")
 		}
 	})
+}
+
+func TestPrintTaskOverviewShowsDownloadFailInfo(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	output := captureStdout(t, func() {
+		printTaskOverview(otaTaskData{
+			DownloadState: otaDownloadState{
+				FailInfo: "network timeout",
+				Percents: 42,
+				Stage:    "Retrive Packages",
+			},
+		}, newTextStyle())
+	})
+
+	if !strings.Contains(output, "Download state fail info: network timeout") {
+		t.Fatalf("expected download fail info in output, got:\n%s", output)
+	}
+}
+
+func TestPrintTaskOverviewAllowsFlashFailureCaseWithoutFlashState(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	output := captureStdout(t, func() {
+		printTaskOverview(otaTaskData{
+			DownloadState: otaDownloadState{
+				Percents: 100,
+				Stage:    downloadStageComplete,
+			},
+			OverallState: otaOverallState{
+				Stage: overallStageTerminate,
+				State: overallStateIdle,
+			},
+		}, newTextStyle())
+	})
+
+	if strings.Contains(output, "Flash failure reason") {
+		t.Fatalf("expected missing flash state to skip flash failure details, got:\n%s", output)
+	}
 }
 
 func TestFormatBytes(t *testing.T) {
@@ -254,6 +308,38 @@ func TestFormatBytes(t *testing.T) {
 			t.Fatalf("formatBytes(%d) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	originalStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = originalStdout
+	}()
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+
+	return string(output)
 }
 
 func TestColorizedOverallState(t *testing.T) {

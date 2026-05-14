@@ -11,10 +11,12 @@ import (
 func TestFileExistsAndNotEmpty(t *testing.T) {
 	t.Parallel()
 
+	//nolint:nilnil
 	t.Run("empty path", func(t *testing.T) {
 		t.Parallel()
 
 		called := false
+
 		got := fileExistsAndNotEmpty(func(string) (os.FileInfo, error) {
 			called = true
 
@@ -23,6 +25,7 @@ func TestFileExistsAndNotEmpty(t *testing.T) {
 		if got {
 			t.Fatal("expected false for empty path")
 		}
+
 		if called {
 			t.Fatal("stat function must not be called for empty path")
 		}
@@ -39,6 +42,7 @@ func TestFileExistsAndNotEmpty(t *testing.T) {
 		}
 	})
 
+	//nolint:nilnil
 	t.Run("nil file info", func(t *testing.T) {
 		t.Parallel()
 
