@@ -6,11 +6,13 @@ import (
 	"archive/zip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -62,9 +64,49 @@ type testDirs struct {
 type fixContextDBCmdRunConfig struct {
 	originTaskFileName   string
 	modifiedTaskFileName string
+	expectedTaskFileName string
 	filesToCreate        []string
 	expectBackup         bool
 	disableSFTP          bool
+	expectFlashFailure   bool
+	expectedRemovedECUs  []string
+	expectedTarget       string
+}
+
+func TestFixContextDB_FlashFailureWithMissingIVIPackages(t *testing.T) {
+	cfg := fixContextDBCmdRunConfig{
+		originTaskFileName:   "flash_failure_ivi_missing_before.json",
+		expectedTaskFileName: "flash_failure_ivi_missing_after.json",
+		filesToCreate: []string{
+			remoteContextJSONPath,
+			"/mnt/ota/data/fota/download/BMS/0d7147dc742eab662637e44d5c39bf8d8bb1647d2c9de77826a658558352cd83.enc.full",
+			bmsOtx,
+			"/mnt/ota/data/fota/download/ADCU/16252442ea7f0edc7d7ea7f202996ff78cec5764cf9ff6b74bf236cc249fe2cc.enc.full",
+			"/mnt/ota/data/fota/download/ADCU/74d40c30770ea9abecbfa07003b72028f5dc6a1dc6daa01e57a6609735d3e029.otx",
+			"/mnt/ota/data/fota/download/BCM/2e2a5f015533a14a651944b39f5d0e70d828485f20dbdc3eb608821260badbd5.enc.full",
+			bcmOtx,
+			"/mnt/ota/data/fota/download/T-BOX/9a305a8e1988fa10fe6e4a843288e77e24958b7d89f50f249256940775f93fc8.enc.full",
+			tBoxOtx,
+			"/mnt/ota/data/fota/download/MCUF0/a5b7d3abdd6ca92cfd2872df9f9ba2f2d4ba368b569d50dd4492b2be6f33747b.enc.full",
+			mcuf0Otx,
+			"/mnt/ota/data/fota/download/POT/b578aed902c5a160d9ba10ba899da223b19313c52fc1ba8007e3e4362ab4e2e4.enc.full",
+			"/mnt/ota/data/fota/download/POT/a819ed5204044974f1227b75abccb5cad8e3382a7139f6687f04133af7889e88.otx",
+			"/mnt/ota/data/fota/download/VCU/bd7bfb90b3a14d634eecce46ced49ddf01924c3735186e923db1f16871935051.enc.full",
+			vcuOtx,
+			"/mnt/ota/data/fota/download/MCUR0/d50ea4d31107e0ca9c897497478b9f27253ea8363fcb8873cdbee9326245c284.enc.full",
+			"/mnt/ota/data/fota/download/MCUR0/26ab12b6562566db22a812d3997f26b532dc193616752e1a74234e345035b822.otx",
+			"/mnt/ota/data/fota/download/GTW/e80d1ca02c951c16d4e8653a5708f89fd12697dd9e079de351fe17c8908a327a.enc.full",
+			gtwOtx,
+			"/mnt/ota/data/fota/download/OBC/fe6db2991c8146c6caf59c98d9acabec62c4f5e70dfe19a1422ab7a6322e251b.enc.full",
+			"/mnt/ota/data/fota/download/OBC/a0c2276c62adefe6d252ce228ef4cceedf784734cb9cebca7179343055e6a66f.otx",
+		},
+		expectBackup:        true,
+		expectFlashFailure:  true,
+		expectedRemovedECUs: []string{"IVI_MCU", "IVI_MPU"},
+		expectedTarget:      "6.5.4",
+	}
+
+	runFixContextDBViaCmd(t, cfg)
 }
 
 func TestFixContextDB_WithoutIVI_MPU_IVI_MCU(t *testing.T) {
@@ -255,7 +297,10 @@ func TestFixContextDB_WhenFlashFailOnlyIVIOrTBoxMissing(t *testing.T) {
 			tBoxEnc2,
 			tBoxOtx,
 		},
-		expectBackup: true,
+		expectBackup:        true,
+		expectFlashFailure:  true,
+		expectedRemovedECUs: []string{"IVI_MPU"},
+		expectedTarget:      "6.6.1",
 	}
 
 	runFixContextDBViaCmd(t, cfg)
@@ -286,7 +331,10 @@ func TestFixContextDB_WhenIdleAndIVIMissing(t *testing.T) {
 			vcuEnc,
 			vcuOtx,
 		},
-		expectBackup: true,
+		expectBackup:        true,
+		expectFlashFailure:  true,
+		expectedRemovedECUs: []string{"IVI_MCU", "IVI_MPU"},
+		expectedTarget:      "6.5.4",
 	}
 
 	runFixContextDBViaCmd(t, cfg)
@@ -363,8 +411,11 @@ func TestFixContextDBViaSCP_WhenFlashFailOnlyIVIOrTBoxMissing(t *testing.T) {
 			tBoxEnc2,
 			tBoxOtx,
 		},
-		expectBackup: true,
-		disableSFTP:  true,
+		expectBackup:        true,
+		disableSFTP:         true,
+		expectFlashFailure:  true,
+		expectedRemovedECUs: []string{"IVI_MPU"},
+		expectedTarget:      "6.6.1",
 	}
 
 	runFixContextDBViaCmd(t, cfg)
@@ -425,7 +476,14 @@ func runFixContextDBViaCmd(
 	dirs := setupTestDirs(t)
 
 	originTaskData := readTextFile(t, filepath.Join(dirs.fixturesDir, cfg.originTaskFileName))
-	modifiedTaskData := readTextFile(t, filepath.Join(dirs.fixturesDir, cfg.modifiedTaskFileName))
+	modifiedTaskData := ""
+	if cfg.modifiedTaskFileName != "" {
+		modifiedTaskData = readTextFile(t, filepath.Join(dirs.fixturesDir, cfg.modifiedTaskFileName))
+	}
+	expectedTaskData := ""
+	if cfg.expectedTaskFileName != "" {
+		expectedTaskData = readTextFile(t, filepath.Join(dirs.fixturesDir, cfg.expectedTaskFileName))
+	}
 
 	if cfg.disableSFTP {
 		t.Setenv("DISABLE_SFTP", "1")
@@ -460,6 +518,7 @@ func runFixContextDBViaCmd(
 	cmd.Dir = dirs.tmpDir
 	cmd.Stdin = strings.NewReader("start\n")
 
+	fixStartedAt := time.Now()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("cmd failed:\n%s\nerror: %v", string(out), err)
@@ -471,7 +530,9 @@ func runFixContextDBViaCmd(
 	resultDB := filepath.Join(dirs.tmpDir, "context_after_fix.db")
 	dockerCopyFromContainer(t, containerName+":"+remoteDBPath, resultDB)
 	gotTaskData := readTaskDataFromDB(t, resultDB)
-	if gotTaskData != strings.TrimSpace(modifiedTaskData) {
+	if cfg.expectFlashFailure {
+		assertFlashFailureTaskData(t, originTaskData, expectedTaskData, gotTaskData, cfg, fixStartedAt)
+	} else if gotTaskData != strings.TrimSpace(modifiedTaskData) {
 		t.Fatalf("unexpected taskData after cmd run: %s", rawDiffSummary(strings.TrimSpace(modifiedTaskData), gotTaskData))
 	}
 
@@ -485,6 +546,90 @@ func runFixContextDBViaCmd(
 	if err := os.RemoveAll(backupDir); err != nil {
 		t.Fatalf("failed to cleanup backup dir %s: %v", backupDir, err)
 	}
+}
+
+//nolint:funlen,gocognit
+func assertFlashFailureTaskData(
+	t *testing.T,
+	originTaskData string,
+	expectedTaskData string,
+	gotTaskData string,
+	cfg fixContextDBCmdRunConfig,
+	fixStartedAt time.Time,
+) {
+	t.Helper()
+
+	var expected map[string]any
+	if expectedTaskData == "" {
+		expectedTaskData = originTaskData
+	}
+	if err := json.Unmarshal([]byte(expectedTaskData), &expected); err != nil {
+		t.Fatalf("failed to parse expected taskData: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(gotTaskData), &got); err != nil {
+		t.Fatalf("failed to parse fixed taskData: %v", err)
+	}
+
+	if cfg.expectedTaskFileName == "" {
+		removedECUs := make(map[string]struct{}, len(cfg.expectedRemovedECUs))
+		for _, ecu := range cfg.expectedRemovedECUs {
+			removedECUs[ecu] = struct{}{}
+		}
+
+		expected["packages_info"] = filterECUObjects(t, expected["packages_info"], removedECUs)
+		expected["ecu_rollback_versions"] = filterECUObjects(t, expected["ecu_rollback_versions"], removedECUs)
+		delete(expected, "flash_state")
+		expected["overall_state"] = map[string]any{"stage": "Schedule", "state": "Process"}
+		expected["schedule_state"] = map[string]any{"set_time": float64(0), "stage": "Wait Set Time"}
+		expected["target_baseline_version"] = cfg.expectedTarget
+	}
+
+	gotExpireTime, ok := got["expire_time"].(float64)
+	if !ok {
+		t.Fatalf("expire_time has unexpected type: %T", got["expire_time"])
+	}
+
+	wantExpireTime := fixStartedAt.AddDate(0, 0, 60).Unix()
+	if delta := int64(gotExpireTime) - wantExpireTime; delta < 0 || delta > 30 {
+		t.Fatalf("unexpected expire_time: got %d, want approximately %d", int64(gotExpireTime), wantExpireTime)
+	}
+
+	expected["expire_time"] = gotExpireTime
+	if !reflect.DeepEqual(got, expected) {
+		expectedJSON, _ := json.Marshal(expected)
+		gotJSON, _ := json.Marshal(got)
+		t.Fatalf("unexpected taskData after FlashFailure fix: %s", rawDiffSummary(string(expectedJSON), string(gotJSON)))
+	}
+}
+
+func filterECUObjects(t *testing.T, value any, removedECUs map[string]struct{}) []any {
+	t.Helper()
+
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("ECU collection has unexpected type: %T", value)
+	}
+
+	filtered := make([]any, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("ECU collection item has unexpected type: %T", item)
+		}
+
+		ecu, ok := object["ecu"].(string)
+		if !ok {
+			t.Fatalf("ECU collection item has invalid ecu: %T", object["ecu"])
+		}
+
+		if _, remove := removedECUs[ecu]; !remove {
+			filtered = append(filtered, item)
+		}
+	}
+
+	return filtered
 }
 
 func verifyBackupArchiveAndCleanup(t *testing.T, backupDir, originTaskData string) {

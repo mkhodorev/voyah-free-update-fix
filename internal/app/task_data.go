@@ -19,6 +19,7 @@ type otaTaskData struct {
 	SourceBaselineVersion  string            `json:"source_baseline_version"`
 	TargetBaselineVersion  string            `json:"target_baseline_version"`
 	PredictUpgradeDuration int               `json:"predict_upgrade_duration"`
+	ReleaseNoteBrief       string            `json:"release_note_brief"`
 	RetryUpgrade           bool              `json:"retry_upgrade"`
 	Rollback               bool              `json:"rollback"`
 	OverallState           otaOverallState   `json:"overall_state"`
@@ -98,6 +99,7 @@ type textStyle struct {
 }
 
 var packagesInfoKeyRegexp = regexp.MustCompile(`"packages_info"\s*:\s*`)
+var targetVersionRegexp = regexp.MustCompile(`\d+\.\d+\.\d+`)
 
 //nolint:misspell
 const (
@@ -119,6 +121,23 @@ const (
 	overallStateFailed       = "Failed"
 	overallStateIdle         = "Idle"
 )
+
+type contextDBFixMode int
+
+const (
+	contextDBFixModeUnsupported contextDBFixMode = iota
+	contextDBFixModeUndownloaded
+	contextDBFixModeFlashFailure
+)
+
+type contextDBFix struct {
+	Mode                  contextDBFixMode
+	PackageIDs            []int
+	PackageECUs           []string
+	TargetBaselineVersion string
+	TargetVersionInferred bool
+	ExpireTime            int64
+}
 
 func newTextStyle() textStyle {
 	return textStyle{
@@ -152,14 +171,11 @@ func printTaskDataInfo(taskData otaTaskData, rows []packageRow, stats packageSta
 
 	switch {
 	case isFlashFailureCase(taskData):
-		printFlashFailureStatus(rows, sty)
+		printFlashFailureStatus(taskData, rows, sty)
 	case isDownloadProcessCase(taskData):
 		printUpdateReadiness(rows, sty)
 	default:
-		fmt.Println(sty.bold(sty.cyan("=== Readiness Status ===")))
-		fmt.Printf("%s\n",
-			sty.red(sty.bold("The OTA task is in an unsupported state. The context.db fix cannot be started.")),
-		)
+		printUnsupportedReadinessStatus(sty)
 	}
 }
 
@@ -267,6 +283,7 @@ func packageVersion(pkg otaPackageInfo) string {
 	return pkg.Version
 }
 
+//nolint:funlen
 func printTaskOverview(taskData otaTaskData, sty textStyle) {
 	fmt.Println(sty.bold(sty.cyan("=== OTA Task Info ===")))
 	fmt.Printf("%s: %s -> %s\n",
@@ -288,12 +305,14 @@ func printTaskOverview(taskData otaTaskData, sty textStyle) {
 			colorizeByPercent(fmt.Sprintf("%d%%", taskData.DownloadState.Percents), taskData.DownloadState.Percents, sty),
 		),
 	)
+
 	if taskData.DownloadState.FailInfo != "" {
 		fmt.Printf("%s: %s\n",
 			sty.bold("Download state fail info"),
 			sty.red(taskData.DownloadState.FailInfo),
 		)
 	}
+
 	fmt.Printf("%s: %s\n",
 		sty.bold("Predict upgrade duration"),
 		sty.bold(fmt.Sprintf("%d min", taskData.PredictUpgradeDuration)),
@@ -441,7 +460,19 @@ func checkFixContextDB(rows []packageRow) (bool, []int) {
 }
 
 func isFixStateAllowed(taskData otaTaskData) bool {
-	return isDownloadProcessCase(taskData) || isFlashFailureCase(taskData)
+	return contextDBFixModeForTask(taskData) != contextDBFixModeUnsupported
+}
+
+func contextDBFixModeForTask(taskData otaTaskData) contextDBFixMode {
+	if isDownloadProcessCase(taskData) {
+		return contextDBFixModeUndownloaded
+	}
+
+	if isFlashFailureCase(taskData) {
+		return contextDBFixModeFlashFailure
+	}
+
+	return contextDBFixModeUnsupported
 }
 
 func isDownloadProcessCase(taskData otaTaskData) bool {
@@ -458,19 +489,12 @@ func isFlashFailureCase(taskData otaTaskData) bool {
 }
 
 func printUpdateReadiness(rows []packageRow, sty textStyle) {
-	missingExceptional, missingRequired := collectMissingECUs(rows)
+	missingExceptional, missingRequired := collectSortedMissingECUs(rows)
 
-	sort.Strings(missingExceptional)
-	sort.Strings(missingRequired)
-
-	fmt.Println(sty.bold(sty.cyan("=== Readiness Status ===")))
+	printReadinessStatusHeader(sty)
 
 	if len(missingExceptional) == 0 && len(missingRequired) == 0 {
-		fmt.Printf("%s\n%s\n",
-			sty.green(sty.bold("All packages are downloaded.")),
-			"Please wait for the update to start.",
-		)
-		printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
+		printAllPackagesDownloaded(rows, "Please wait for the update to start.", sty)
 
 		return
 	}
@@ -481,8 +505,7 @@ func printUpdateReadiness(rows []packageRow, sty textStyle) {
 			sty.yellow(strings.Join(missingExceptional, ", ")),
 		)
 		fmt.Println(sty.red(sty.magenta("These ECUs must be updated manually!")))
-		fmt.Println(sty.green(sty.bold("\nThe context.db fix can be started.")))
-		printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
+		printFixCanBeStarted(rows, sty)
 
 		return
 	}
@@ -502,19 +525,13 @@ func printUpdateReadiness(rows []packageRow, sty textStyle) {
 	fmt.Println(sty.red(sty.bold("\nThe context.db fix cannot be started.")))
 }
 
-func printFlashFailureStatus(rows []packageRow, sty textStyle) {
-	missingExceptional, missingRequired := collectMissingECUs(rows)
-	sort.Strings(missingExceptional)
-	sort.Strings(missingRequired)
+func printFlashFailureStatus(taskData otaTaskData, rows []packageRow, sty textStyle) {
+	missingExceptional, missingRequired := collectSortedMissingECUs(rows)
 
-	fmt.Println(sty.bold(sty.cyan("=== Readiness Status ===")))
+	printReadinessStatusHeader(sty)
 
 	if len(missingExceptional) == 0 && len(missingRequired) == 0 {
-		fmt.Printf("%s\n%s\n",
-			sty.green(sty.bold("All packages are downloaded.")),
-			"No context.db fix is required.",
-		)
-		printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
+		printAllPackagesDownloaded(rows, "No context.db fix is required.", sty)
 
 		return
 	}
@@ -543,8 +560,56 @@ func printFlashFailureStatus(rows []packageRow, sty textStyle) {
 
 	fmt.Println(sty.magenta(sty.bold("These ECUs must be updated manually!")))
 
+	if strings.TrimSpace(taskData.TargetBaselineVersion) == "" &&
+		extractTargetBaselineVersion(taskData.ReleaseNoteBrief) == "" {
+		fmt.Println(sty.red(sty.bold(
+			"\nThe target version could not be determined. The context.db fix cannot be started.",
+		)))
+
+		return
+	}
+
+	printFixCanBeStarted(rows, sty)
+}
+
+func collectSortedMissingECUs(rows []packageRow) ([]string, []string) {
+	missingExceptional, missingRequired := collectMissingECUs(rows)
+	sort.Strings(missingExceptional)
+	sort.Strings(missingRequired)
+
+	return missingExceptional, missingRequired
+}
+
+func printReadinessStatusHeader(sty textStyle) {
+	fmt.Println(sty.bold(sty.cyan("=== Readiness Status ===")))
+}
+
+func printAllPackagesDownloaded(rows []packageRow, nextStep string, sty textStyle) {
+	fmt.Printf("%s\n%s\n",
+		sty.green(sty.bold("All packages are downloaded.")),
+		nextStep,
+	)
+	printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
+}
+
+func printFixCanBeStarted(rows []packageRow, sty textStyle) {
 	fmt.Println(sty.green(sty.bold("\nThe context.db fix can be started.")))
 	printMissingUpgradeSpecsWarning(collectMissingUpgradeSpecs(rows), sty)
+}
+
+func printUnsupportedReadinessStatus(sty textStyle) {
+	printReadinessStatusHeader(sty)
+	fmt.Printf("%s\n",
+		sty.red(sty.bold("The OTA task is in an unsupported state. The context.db fix cannot be started.")),
+	)
+	fmt.Println()
+	fmt.Println(sty.red("The context.db fix can be started only in one of states:"))
+	fmt.Println("  - download_state.stage='Retrive Packages' and packages IVI_MCU, IVI_MPU or T-Box are not downloaded")
+	fmt.Println("  - download_state.stage='Complete' and flash failure of IVI_MCU, IVI_MPU or T-Box")
+}
+
+func extractTargetBaselineVersion(releaseNoteBrief string) string {
+	return targetVersionRegexp.FindString(releaseNoteBrief)
 }
 
 func collectMissingECUs(rows []packageRow) ([]string, []string) {

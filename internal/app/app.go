@@ -2,11 +2,13 @@ package app
 
 import (
 	"bufio"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -36,6 +38,7 @@ const (
 	localContextDBTmpFile   = "context.db.tmp"
 	localContextJSONTmpFile = "context.json.tmp"
 	rebootCmdEnvVar         = "REBOOT_TBOX_COMMAND"
+	flashFailureExpiryDays  = 60
 
 	iviMCUName = "IVI_MCU"
 	iviMPUName = "IVI_MPU"
@@ -76,20 +79,20 @@ func RunWithConfig(cfg RuntimeConfig) error {
 	}
 	defer remoteFS.Close()
 
-	acceptToStartFix, missingPackageIDs, err := analyzeContextDB(remoteFS)
+	fix, err := analyzeContextDB(remoteFS)
 	if err != nil {
 		return fmt.Errorf("error analyzing context.db: %w", err)
 	}
 
-	if !acceptToStartFix {
+	if fix == nil {
 		return nil
 	}
 
-	if !askConfirmation() {
+	if !askConfirmation(*fix) {
 		return nil
 	}
 
-	if err := fixContextDB(sshClient, remoteFS, missingPackageIDs); err != nil {
+	if err := fixContextDB(sshClient, remoteFS, *fix); err != nil {
 		return fmt.Errorf("error fixing context.db: %w", err)
 	}
 
@@ -128,28 +131,29 @@ func applyRuntimeConfig(cfg RuntimeConfig) {
 	}
 }
 
-func analyzeContextDB(client tboxFileClient) (bool, []int, error) {
+//nolint:nilnil
+func analyzeContextDB(client tboxFileClient) (*contextDBFix, error) {
 	err := downloadContextDB(client)
 	if err != nil {
-		return false, nil, fmt.Errorf("error downloading context.db: %w", err)
+		return nil, fmt.Errorf("error downloading context.db: %w", err)
 	}
 
 	defer os.Remove(localContextDBTmpFile)
 
 	dbConn, err := connectToDB()
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 	defer dbConn.Close()
 
 	taskDataJSON, err := getOTATaskData(dbConn)
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 
 	taskData, err := parseOTATaskData(taskDataJSON)
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 
 	rows, stats := buildPackageRowsAndStats(taskData.PackagesInfo, client)
@@ -158,29 +162,64 @@ func analyzeContextDB(client tboxFileClient) (bool, []int, error) {
 
 	fixRequired, missingPackageIDs := checkFixContextDB(rows)
 	if !fixRequired {
-		return false, nil, nil
+		return nil, nil
 	}
 
-	if !isFixStateAllowed(taskData) {
-		fmt.Println()
-		fmt.Printf(
-			"%sThe context.db fix can be started only in one of states:%s\n",
-			colorRed,
-			colorReset,
+	mode := contextDBFixModeForTask(taskData)
+	if mode == contextDBFixModeUnsupported {
+		return nil, nil
+	}
+
+	fix, err := buildContextDBFix(taskData, missingPackageIDs, mode)
+	if err != nil {
+		return nil, err
+	}
+
+	return &fix, nil
+}
+
+func buildContextDBFix(
+	taskData otaTaskData,
+	packageIDs []int,
+	mode contextDBFixMode,
+) (contextDBFix, error) {
+	fix := contextDBFix{
+		Mode:        mode,
+		PackageIDs:  append([]int(nil), packageIDs...),
+		PackageECUs: make([]string, 0, len(packageIDs)),
+	}
+
+	for _, idx := range packageIDs {
+		if idx < 0 || idx >= len(taskData.PackagesInfo) {
+			return contextDBFix{}, fmt.Errorf("invalid package index selected for fix: %d", idx)
+		}
+
+		fix.PackageECUs = append(fix.PackageECUs, taskData.PackagesInfo[idx].ECU)
+	}
+
+	if mode != contextDBFixModeFlashFailure {
+		return fix, nil
+	}
+
+	fix.TargetBaselineVersion = strings.TrimSpace(taskData.TargetBaselineVersion)
+	if fix.TargetBaselineVersion != "" {
+		return fix, nil
+	}
+
+	fix.TargetBaselineVersion = extractTargetBaselineVersion(taskData.ReleaseNoteBrief)
+	if fix.TargetBaselineVersion == "" {
+		return contextDBFix{}, errors.New(
+			"target_baseline_version is empty and no X.Y.Z version was found in release_note_brief",
 		)
-		fmt.Println("  - download_state.stage='Retrive Packages' and packages IVI_MCU, IVI_MPU or T-Box are not downloaded")
-		fmt.Println("  - download_state.stage='Complete' and flash failure of IVI_MCU, IVI_MPU or T-Box")
-		fmt.Println("  - download_state.stage='Complete', overall_state.stage='Terminate', overall_state.state='Idle'")
-		fmt.Println("      and packages IVI_MCU, IVI_MPU or T-Box package files are missing")
-
-		return false, nil, nil
 	}
 
-	return true, missingPackageIDs, nil
+	fix.TargetVersionInferred = true
+
+	return fix, nil
 }
 
 //nolint:cyclop
-func fixContextDB(sshClient *ssh.Client, client tboxFileClient, missingPackageIDs []int) error {
+func fixContextDB(sshClient *ssh.Client, client tboxFileClient, fix contextDBFix) error {
 	fmt.Println()
 	fmt.Println("Start fixing context.db...")
 
@@ -213,7 +252,7 @@ func fixContextDB(sshClient *ssh.Client, client tboxFileClient, missingPackageID
 		return err
 	}
 
-	if err := removeUndownloadedPackagesInDB(dbConn, missingPackageIDs); err != nil {
+	if err := applyContextDBFix(dbConn, fix); err != nil {
 		return err
 	}
 
@@ -242,7 +281,19 @@ func fixContextDB(sshClient *ssh.Client, client tboxFileClient, missingPackageID
 	return nil
 }
 
-func askConfirmation() bool {
+func applyContextDBFix(dbConn *sql.DB, fix contextDBFix) error {
+	if fix.Mode == contextDBFixModeFlashFailure {
+		fix.ExpireTime = time.Now().AddDate(0, 0, flashFailureExpiryDays).Unix()
+	}
+
+	return removeUndownloadedPackagesInDB(dbConn, fix)
+}
+
+func askConfirmation(fix contextDBFix) bool {
+	if fix.TargetVersionInferred {
+		printInferredTargetWarning(fix.TargetBaselineVersion)
+	}
+
 	fmt.Print("\nAre you sure you want to start fix context.db in T-Box? Type 'start' to confirm: ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -261,4 +312,14 @@ func askConfirmation() bool {
 	}
 
 	return true
+}
+
+func printInferredTargetWarning(version string) {
+	fmt.Printf(
+		"\n%sWarning: target_baseline_version was empty. Version %s was extracted from release_note_brief.%s\n",
+		colorRed,
+		version,
+		colorReset,
+	)
+	fmt.Println("Please verify that this is the correct target version before continuing.")
 }

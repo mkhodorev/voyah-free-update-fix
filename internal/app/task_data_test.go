@@ -255,6 +255,7 @@ func TestPrintTaskOverviewShowsDownloadFailInfo(t *testing.T) {
 
 	output := captureStdout(t, func() {
 		printTaskOverview(otaTaskData{
+			//nolint:misspell
 			DownloadState: otaDownloadState{
 				FailInfo: "network timeout",
 				Percents: 42,
@@ -314,12 +315,14 @@ func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
 	originalStdout := os.Stdout
+
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("create stdout pipe: %v", err)
 	}
 
 	os.Stdout = writer
+
 	defer func() {
 		os.Stdout = originalStdout
 	}()
@@ -396,5 +399,74 @@ func TestCollectMissingUpgradeSpecs(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("collectMissingUpgradeSpecs() = %v, want %v", got, want)
+	}
+}
+
+func TestExtractTargetBaselineVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "plain OTA version",
+			text: "OTA 6.5.4 update",
+			want: "6.5.4",
+		},
+		{
+			name: "prefers three component version",
+			text: "OTA6.6 update (V6.6.1)",
+			want: "6.6.1",
+		},
+		{name: "not found", text: "OTA update", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := extractTargetBaselineVersion(tt.text); got != tt.want {
+				t.Fatalf("extractTargetBaselineVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrintUnsupportedReadinessStatus(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	output := captureStdout(t, func() {
+		printUnsupportedReadinessStatus(newTextStyle())
+	})
+
+	for _, expected := range []string{
+		"The OTA task is in an unsupported state",
+		"download_state.stage='Retrive Packages'",
+		"download_state.stage='Complete'",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in output, got:\n%s", expected, output)
+		}
+	}
+}
+
+func TestPrintFlashFailureStatusBlocksUnknownTargetVersion(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	rows := []packageRow{{
+		ECU:           iviMPUName,
+		Status:        packageStatusPending,
+		FileExists:    false,
+		OriginalIndex: 0,
+	}}
+	output := captureStdout(t, func() {
+		printFlashFailureStatus(otaTaskData{}, rows, newTextStyle())
+	})
+
+	if !strings.Contains(output, "target version could not be determined") ||
+		strings.Contains(output, "The context.db fix can be started.") {
+		t.Fatalf("unexpected FlashFailure readiness output:\n%s", output)
 	}
 }

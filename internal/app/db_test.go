@@ -94,6 +94,29 @@ func extractTaskDataMap(t *testing.T, db *sql.DB) map[string]any {
 	return parsed
 }
 
+func requireMapValue(t *testing.T, value any, name string) map[string]any {
+	t.Helper()
+
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s has unexpected type: %T", name, value)
+	}
+
+	return result
+}
+
+func requireSliceValue(t *testing.T, value any, name string) []any {
+	t.Helper()
+
+	result, ok := value.([]any)
+	if !ok {
+		t.Fatalf("%s has unexpected type: %T", name, value)
+	}
+
+	return result
+}
+
+//nolint:gocognit
 func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 	t.Parallel()
 
@@ -105,7 +128,7 @@ func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 
 		insertTaskDataRow(t, db, `{"packages_info":[{"ecu":"A"}]}`)
 
-		if err := removeUndownloadedPackagesInDB(db, nil); err != nil {
+		if err := removeUndownloadedPackagesInDB(db, contextDBFix{}); err != nil {
 			t.Fatalf("expected nil error for empty ids, got %v", err)
 		}
 
@@ -129,7 +152,8 @@ func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 			"overall_state":{"stage":"Terminate","state":"Failed"}
 		}`)
 
-		if err := removeUndownloadedPackagesInDB(db, []int{1, 3}); err != nil {
+		fix := contextDBFix{Mode: contextDBFixModeUndownloaded, PackageIDs: []int{1, 3}}
+		if err := removeUndownloadedPackagesInDB(db, fix); err != nil {
 			t.Fatalf("removeUndownloadedPackagesInDB returned error: %v", err)
 		}
 
@@ -169,6 +193,85 @@ func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 		}
 	})
 
+	t.Run("flash failure reuses package removal and schedules update", func(t *testing.T) {
+		t.Parallel()
+
+		db := newTestDB(t)
+		defer db.Close()
+
+		insertTaskDataRow(t, db, `{
+			"packages_info":[{"ecu":"A"},{"ecu":"IVI_MCU"},{"ecu":"C"},{"ecu":"IVI_MPU"}],
+			"ecu_rollback_versions":[{"ecu":"A"},{"ecu":"IVI_MCU"},{"ecu":"C"},{"ecu":"IVI_MPU"}],
+			"flash_state":{"failure_reason":"FLASH_FAIL"},
+			"schedule_state":{"set_time":10,"stage":"Time Reached"},
+			"download_state":{"download_type":0,"fail_info":"timeout","percents":100,"stage":"Complete"},
+			"overall_state":{"stage":"Terminate","state":"Failed"},
+			"expire_time":100,
+			"target_baseline_version":null
+		}`)
+
+		fix := contextDBFix{
+			Mode:                  contextDBFixModeFlashFailure,
+			PackageIDs:            []int{1, 3},
+			PackageECUs:           []string{iviMCUName, iviMPUName},
+			TargetBaselineVersion: "6.5.4",
+			ExpireTime:            123456789,
+		}
+		if err := removeUndownloadedPackagesInDB(db, fix); err != nil {
+			t.Fatalf("removeUndownloadedPackagesInDB returned error: %v", err)
+		}
+
+		if got, want := extractPackageECUs(t, db), []string{"A", "C"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("unexpected packages after flash failure fix: got %v, want %v", got, want)
+		}
+
+		taskData := extractTaskDataMap(t, db)
+		if _, ok := taskData["flash_state"]; ok {
+			t.Fatal("flash_state must be removed")
+		}
+
+		downloadState := requireMapValue(t, taskData["download_state"], "download_state")
+		if downloadState["stage"] != "Complete" || downloadState["fail_info"] != "timeout" {
+			t.Fatalf("download_state must be preserved: %+v", downloadState)
+		}
+
+		overallState := requireMapValue(t, taskData["overall_state"], "overall_state")
+		if overallState["stage"] != "Schedule" || overallState["state"] != "Process" {
+			t.Fatalf("unexpected overall_state: %+v", overallState)
+		}
+
+		scheduleState := requireMapValue(t, taskData["schedule_state"], "schedule_state")
+		if scheduleState["set_time"] != float64(0) || scheduleState["stage"] != "Wait Set Time" {
+			t.Fatalf("unexpected schedule_state: %+v", scheduleState)
+		}
+
+		if taskData["expire_time"] != float64(123456789) {
+			t.Fatalf("unexpected expire_time: %v", taskData["expire_time"])
+		}
+
+		if taskData["target_baseline_version"] != "6.5.4" {
+			t.Fatalf("unexpected target_baseline_version: %v", taskData["target_baseline_version"])
+		}
+
+		rollbackVersions := requireSliceValue(t, taskData["ecu_rollback_versions"], "ecu_rollback_versions")
+		rollbackECUs := make([]string, 0, len(rollbackVersions))
+
+		for _, item := range rollbackVersions {
+			rollbackVersion := requireMapValue(t, item, "ecu_rollback_versions item")
+
+			ecu, ok := rollbackVersion["ecu"].(string)
+			if !ok {
+				t.Fatalf("rollback ECU has unexpected type: %T", rollbackVersion["ecu"])
+			}
+
+			rollbackECUs = append(rollbackECUs, ecu)
+		}
+
+		if want := []string{"A", "C"}; !reflect.DeepEqual(rollbackECUs, want) {
+			t.Fatalf("unexpected rollback ECUs: got %v, want %v", rollbackECUs, want)
+		}
+	})
+
 	t.Run("negative index returns error", func(t *testing.T) {
 		t.Parallel()
 
@@ -177,7 +280,9 @@ func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 
 		insertTaskDataRow(t, db, `{"packages_info":[{"ecu":"A"}]}`)
 
-		err := removeUndownloadedPackagesInDB(db, []int{-1})
+		err := removeUndownloadedPackagesInDB(db, contextDBFix{
+			Mode: contextDBFixModeUndownloaded, PackageIDs: []int{-1},
+		})
 		if err == nil {
 			t.Fatal("expected error for negative index")
 		}
@@ -193,7 +298,9 @@ func TestRemoveUndownloadedPackagesInDB(t *testing.T) {
 		db := newTestDB(t)
 		defer db.Close()
 
-		err := removeUndownloadedPackagesInDB(db, []int{0})
+		err := removeUndownloadedPackagesInDB(db, contextDBFix{
+			Mode: contextDBFixModeUndownloaded, PackageIDs: []int{0},
+		})
 		if err == nil {
 			t.Fatal("expected error when no rows were updated")
 		}
