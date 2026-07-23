@@ -74,7 +74,15 @@ type fixContextDBCmdRunConfig struct {
 }
 
 func TestFixContextDB_FlashFailureWithMissingIVIPackages(t *testing.T) {
-	cfg := fixContextDBCmdRunConfig{
+	runFixContextDBViaCmd(t, flashFailureWithMissingIVIPackagesConfig(false))
+}
+
+func TestFixContextDBViaSCP_FlashFailureWithMissingIVIPackages(t *testing.T) {
+	runFixContextDBViaCmd(t, flashFailureWithMissingIVIPackagesConfig(true))
+}
+
+func flashFailureWithMissingIVIPackagesConfig(disableSFTP bool) fixContextDBCmdRunConfig {
+	return fixContextDBCmdRunConfig{
 		originTaskFileName:   "flash_failure_ivi_missing_before.json",
 		expectedTaskFileName: "flash_failure_ivi_missing_after.json",
 		filesToCreate: []string{
@@ -101,12 +109,11 @@ func TestFixContextDB_FlashFailureWithMissingIVIPackages(t *testing.T) {
 			"/mnt/ota/data/fota/download/OBC/a0c2276c62adefe6d252ce228ef4cceedf784734cb9cebca7179343055e6a66f.otx",
 		},
 		expectBackup:        true,
+		disableSFTP:         disableSFTP,
 		expectFlashFailure:  true,
 		expectedRemovedECUs: []string{"IVI_MCU", "IVI_MPU"},
 		expectedTarget:      "6.5.4",
 	}
-
-	runFixContextDBViaCmd(t, cfg)
 }
 
 func TestFixContextDB_WithoutIVI_MPU_IVI_MCU(t *testing.T) {
