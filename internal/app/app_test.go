@@ -143,6 +143,13 @@ func TestAnalyzeContextDBWithExistingFixtures(t *testing.T) {
 			wantTarget:  "6.6.1",
 		},
 		{
+			name:        "before_1 removes both undownloaded IVI packages",
+			fixtureName: "../../before_1.json",
+			missingECUs: []string{iviMCUName, iviMPUName},
+			wantMode:    contextDBFixModeUndownloaded,
+			wantECUs:    []string{iviMPUName, iviMCUName},
+		},
+		{
 			name:        "missing required package does not offer a fix",
 			fixtureName: "origin.txt",
 			missingECUs: []string{"BMS"},
